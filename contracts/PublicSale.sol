@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.9;
+pragma solidity 0.8.18;
 
+import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
@@ -20,6 +21,8 @@ contract PublicSale is
     // Crear su setter
     IERC20Upgradeable miPrimerToken;
 
+    using Counters for Counters.Counter;
+    Counters.Counter public _totalSupply;
     // 17 de Junio del 2023 GMT
     uint256 constant startDate = 1686960000;
 
@@ -29,6 +32,9 @@ contract PublicSale is
     // Gnosis Safe
     // Crear su setter
     address gnosisSafeWallet;
+
+    mapping(uint256 =>bool)isNFTMinted;
+    uint256[] listIDsNotMinted;
 
     event DeliverNft(address winnerAccount, uint256 nftId);
 
@@ -45,6 +51,7 @@ contract PublicSale is
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(PAUSER_ROLE, msg.sender);
         _grantRole(UPGRADER_ROLE, msg.sender);
+        initializeNotMintedArray();
     }
 
     function purchaseNftById(uint256 _id) external {
@@ -58,14 +65,33 @@ contract PublicSale is
         // 4 - el _id se encuentre entre 1 y 30
         //         * Mensaje de error: "NFT: Token id out of range"
 
-        // Obtener el precio segun el id
-        uint256 priceNft = _getPriceById(_id);
 
+
+
+        require(_id >= 1 && _id <= 30, "NFT: Token id out of range");
+        require(!isNFTMinted[_id], "Public Sale: id not available");
+        
+
+
+        // Obtener el precio segun el id
+        uint256 priceNft = getPriceById(_id);
+
+        require(priceNft > 0, "Public Sale: Invalid NFT price");
+        require(miPrimerToken.allowance(msg.sender, address(this)) >= priceNft, "Public Sale: Not enough allowance");
+        require(miPrimerToken.balanceOf(msg.sender) >= priceNft, "Public Sale: Not enough token balance");
+
+
+        updateTokenMinted(_id);
         // Purchase fees
         // 10% para Gnosis Safe (fee)
         // 90% se quedan en este contrato (net)
         // from: msg.sender - to: gnosisSafeWallet - amount: fee
         // from: msg.sender - to: address(this) - amount: net
+        miPrimerToken.transferFrom(msg.sender, gnosisSafeWallet, (priceNft*10)/100); // 10% fee
+        miPrimerToken.transferFrom(msg.sender, address(this), (priceNft*90)/100); // net amount
+
+      
+
 
         // EMITIR EVENTO para que lo escuche OPEN ZEPPELIN DEFENDER
         emit DeliverNft(msg.sender, _id);
@@ -76,19 +102,28 @@ contract PublicSale is
         // 1 - que el msg.value sea mayor o igual a 0.01 ether
         // 2 - que haya NFTs disponibles para hacer el random
 
+        require(msg.value >= 0.01 ether, "Public Sale: Insufficient Ether amount");
+        require(listIDsNotMinted.length >0, "No hay tokens disponibles en lista");
+
         // Escgoer una id random de la lista de ids disponibles
         uint256 nftId = _getRandomNftId();
 
         // Enviar ether a Gnosis Safe
         // SUGERENCIA: Usar gnosisSafeWallet.call para enviar el ether
         // Validar los valores de retorno de 'call' para saber si se envio el ether correctamente
+        
+        updateTokenMinted(nftId);
+        
 
         // Dar el cambio al usuario
         // El vuelto seria equivalente a: msg.value - 0.01 ether
         if (msg.value > 0.01 ether) {
             // logica para dar cambio
             // usar '.transfer' para enviar ether de vuelta al usuario
+            uint256 change = msg.value - 0.01 ether;
+            payable(msg.sender).transfer(change);
         }
+        call(gnosisSafeWallet,0.01 ether);
 
         // EMITIR EVENTO para que lo escuche OPEN ZEPPELIN DEFENDER
         emit DeliverNft(msg.sender, nftId);
@@ -96,37 +131,108 @@ contract PublicSale is
 
     // PENDING
     // Crear el metodo receive
+    receive() external payable {
+        depositEthForARandomNft();
+    }
 
     ////////////////////////////////////////////////////////////////////////
     /////////                    Helper Methods                    /////////
     ////////////////////////////////////////////////////////////////////////
 
     // Devuelve un id random de NFT de una lista de ids disponibles
-    function _getRandomNftId() internal view returns (uint256) {}
 
     // Según el id del NFT, devuelve el precio. Existen 3 grupos de precios
-    function _getPriceById(uint256 _id) internal view returns (uint256) {
-        uint256 priceGroupOne;
-        uint256 priceGroupTwo;
-        uint256 priceGroupThree;
+    // Definir una variable global para almacenar el timestamp actual en epoch
+    
+
+    function getPriceById(uint256 _id) internal view returns (uint256) {
+            
         if (_id > 0 && _id < 11) {
-            return priceGroupOne;
+            
         } else if (_id > 10 && _id < 21) {
-            return priceGroupTwo;
+           
+            return _id * 1000;
         } else {
-            return priceGroupThree;
+           
+            uint256 hoursPassed = (block.timestamp - startDate) / 3600; // 1623888000 es el timestamp correspondiente a las 00:00 horas del 17 de Junio del 2023 GMT
+            
+            uint256 basePrice = 10000; // Precio base de un NFT legendario
+            uint256 hourlyIncrement = 1000; // Incremento horario del precio de un NFT legendario
+            uint256 maxPrice = 50000; // Precio máximo de un NFT legendario
+            
+            uint256 price = basePrice + hoursPassed * hourlyIncrement;
+            
+            price = price > maxPrice ? maxPrice : price;
+                
+            return price;
         }
     }
 
     function pause() public onlyRole(PAUSER_ROLE) {
-        _pause();
-    }
+            _pause();
+        }
 
     function unpause() public onlyRole(PAUSER_ROLE) {
-        _unpause();
-    }
+            _unpause();
+        }
 
     function _authorizeUpgrade(
-        address newImplementation
-    ) internal override onlyRole(UPGRADER_ROLE) {}
+            address newImplementation
+        ) internal override onlyRole(UPGRADER_ROLE) {}    
+    
+
+    function initializeNotMintedArray() internal {
+        for (uint i = 1; i <= 30; i++) {
+            listIDsNotMinted.push(i);
+        }
+    }
+
+    function updateTokenMinted(uint256 _id) internal {
+        _removeIDnotMinted(_id);
+        isNFTMinted[_id] = true;
+        
+        _totalSupply.increment();
+    }
+
+    function _removeIDnotMinted(uint256 _id) internal {
+        for (uint i = 0; i < listIDsNotMinted.length; i++) {
+            if (listIDsNotMinted[i] == _id) {
+                listIDsNotMinted[i] = listIDsNotMinted[listIDsNotMinted.length - 1];
+                listIDsNotMinted.pop();
+                break;
+            }
+        }
+    }
+
+
+    function setGnosisSafeWallet(
+        address _safeWallet
+    ) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        gnosisSafeWallet = _safeWallet;
+    }
+    function setTokenAddress(
+            address _tknAdress
+        ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+            miPrimerToken = IERC20Upgradeable(_tknAdress);
+    }
+
+    function call(address _scAddress, uint256 _amount) internal {
+        (bool success,) = payable(_scAddress).call{
+            value: _amount,
+            gas: 5000000
+        }("");
+        // error indica el error por el cual fallo
+        require(success, "No se completo pago a gnosis");
+    }
+// Devuelve un id random de NFT de una lista de ids disponibles
+    function _getRandomNftId() internal view returns (uint256) {
+        uint256 long=listIDsNotMinted.length;
+        require(long > 0, "No hay token disponibles");
+        uint256 ramdom = (uint(
+            keccak256(abi.encodePacked(block.difficulty, block.timestamp))
+        ) % long);
+
+        return listIDsNotMinted[ramdom];
+    }
+
 }
