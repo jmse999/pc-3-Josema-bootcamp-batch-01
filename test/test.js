@@ -9,7 +9,10 @@ const BURNER_ROLE = getRole("BURNER_ROLE");
 
 // 17 de Junio del 2023 GMT
 var startDate = 1686960000;
-
+const pe = ethers.utils.parseEther;
+const parseEth = (num) => {
+  return pe(Number(num).toString())
+}
 var makeBN = (num) => ethers.BigNumber.from(String(num));
 
 describe("MI PRIMER TOKEN TESTING", function () {
@@ -107,10 +110,20 @@ describe("MI PRIMER TOKEN TESTING", function () {
     // Se publica el contrato antes de cada test
     // beforeEach(async () => {
     //   await deployPublicSaleSC();
+    //   await miPrimerToken.connect(alice)
+    //     .approve(publicSale.address, pe("1000000000000"))
+    //   await miPrimerToken.connect(owner).mint(alice.address, pe("1000000000000"))
+
     // });
 
     it("No se puede comprar otra vez el mismo ID", async () => {
-      
+      await deployPublicSaleSC();
+      await miPrimerToken.connect(alice)
+        .approve(publicSale.address, pe("1000000000000"))
+      await miPrimerToken.connect(owner).mint(alice.address, pe("1000000000000"));
+      const nftId = 1
+      await publicSale.connect(alice).purchaseNftById(nftId)
+      await expect(publicSale.connect(alice).purchaseNftById(nftId)).to.be.reverted
     });
 
     // it("IDs aceptables: [1, 30]", async () => {

@@ -1,5 +1,5 @@
 import { BigNumber, Contract, providers, ethers, utils } from "ethers";
-
+import address from "./tokens.json";
 const nftTknAbi = require("../artifacts/contracts/NFT.sol/MiPrimerNft.json").abi;
 const publicSaleAbi = require("../artifacts/contracts/PublicSale.sol/PublicSale.json").abi;
 const usdcTknAbi = require("../artifacts/contracts/USDCoin.sol/USDCoin.json").abi;
